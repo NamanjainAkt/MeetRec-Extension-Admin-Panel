@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Meeting Recorder",
+  "version": "1.0.0",
+  "description": "Record meetings from Google Meet, Zoom, and Teams",
+  "permissions": [
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:3004/*",
+    "http://localhost:3000/*",
+    "https://*.vercel.app/*",
+    "https://*.netlify.app/*",
+    "https://meet.google.com/*",
+    "https://*.zoom.us/*",
+    "https://teams.microsoft.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
