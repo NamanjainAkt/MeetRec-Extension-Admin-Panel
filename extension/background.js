@@ -1,206 +1,162 @@
-console.log('[Background] Service worker initialized');
+console.log('[MeetRec] Background service worker started');
 
-// Recording state management
-let recordingState = {
-  isRecording: false,
-  tabId: null,
-  startTime: null
-};
+let uploadId = null;
+let chunkBuffer = [];
+let bufferSize = 0;
+let totalUploadedBytes = 0;
+let isUploading = false;
+let uploadQueue = [];
+const CHUNK_SIZE_LIMIT = 5 * 1024 * 1024; // 5MB minimum for Cloudinary chunks
 
-// Listen for messages from popup and offscreen
+// Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Background] Received message:', message.type);
+  console.log('[MeetRec] Message:', message.type);
 
-  if (message.type === 'START_CAPTURE') {
-    handleStartRecording(message, sendResponse);
-    return true; // Keep channel open for async response
-  }
-
-  if (message.type === 'STOP_CAPTURE') {
-    handleStopRecording(sendResponse);
-    return true;
-  }
-
-  // Listen for recording complete from offscreen document
-  if (message.type === 'RECORDING_COMPLETE') {
-    handleRecordingComplete(message.data);
+  if (message.type === 'INIT_UPLOAD') {
+    initUpload();
     sendResponse({ success: true });
   }
 
-  if (message.type === 'RECORDING_ERROR') {
-    console.error('[Background] Recording error from offscreen:', message.error);
-    recordingState.isRecording = false;
-    sendResponse({ success: false, error: message.error });
+  if (message.type === 'UPLOAD_CHUNK') {
+    // Data comes as array of numbers (Uint8Array)
+    const uint8Array = new Uint8Array(message.data);
+    const blob = new Blob([uint8Array], { type: 'video/webm' });
+    handleDataAvailable(blob);
+    sendResponse({ success: true });
   }
+
+  if (message.type === 'FINISH_UPLOAD') {
+    finishUpload(sender.tab.id);
+    sendResponse({ success: true });
+  }
+
+  return true; // Keep channel open for async response
 });
 
-// Start recording flow
-async function handleStartRecording(message, sendResponse) {
+function initUpload() {
+  console.log('[MeetRec] Initializing upload...');
+  // Reset state
+  uploadId = 'meetrec_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  chunkBuffer = [];
+  bufferSize = 0;
+  totalUploadedBytes = 0;
+  uploadQueue = [];
+  isUploading = false;
+}
+
+async function handleDataAvailable(blob) {
+  chunkBuffer.push(blob);
+  bufferSize += blob.size;
+
+  // If buffer is large enough, upload it
+  if (bufferSize >= CHUNK_SIZE_LIMIT) {
+    await flushBuffer(false);
+  }
+}
+
+async function finishUpload(tabId) {
+  console.log('[MeetRec] Finishing upload...');
+  await flushBuffer(true, tabId);
+}
+
+async function flushBuffer(isFinal, tabId) {
+  if (chunkBuffer.length === 0 && !isFinal) return;
+
+  const blob = new Blob(chunkBuffer, { type: 'video/webm' });
+  chunkBuffer = [];
+  bufferSize = 0;
+
+  // Add to upload queue
+  uploadQueue.push({ blob, isFinal, tabId });
+  processUploadQueue();
+}
+
+async function processUploadQueue() {
+  if (isUploading || uploadQueue.length === 0) return;
+
+  isUploading = true;
+  const { blob, isFinal, tabId } = uploadQueue.shift();
+
   try {
-    const { tabId, title } = message;
+    console.log(`[MeetRec] Uploading chunk: ${blob.size} bytes (Final: ${isFinal})`);
+    const result = await uploadChunkToCloudinary(blob, isFinal);
 
-    console.log('[Background] Starting recording for tab:', tabId);
+    totalUploadedBytes += blob.size;
 
-    // Check if already recording
-    if (recordingState.isRecording && recordingState.tabId === tabId) {
-      console.log('[Background] Already recording this tab');
-      sendResponse({ success: false, error: 'Already recording this tab' });
-      return;
+    if (isFinal) {
+      console.log('[MeetRec] Upload complete:', result);
+      await saveMetadata(result);
+      if (tabId) {
+        chrome.tabs.sendMessage(tabId, { type: 'RECORDING_COMPLETE' });
+      }
     }
-
-    // Step 1: Get stream ID from tabCapture (✅ ALLOWED in service worker)
-    const streamId = await getStreamId(tabId);
-
-    // Step 2: Create offscreen document if not exists
-    await setupOffscreenDocument();
-
-    // Step 3: Send stream ID to offscreen document
-    chrome.runtime.sendMessage({
-      type: 'START_OFFSCREEN_RECORDING',
-      target: 'offscreen',
-      data: {
-        streamId,
-        tabId,
-        tabUrl: '', // Will be filled by popup
-        tabTitle: title || 'Meeting Recording'
-      }
-    });
-
-    // Update state
-    recordingState = {
-      isRecording: true,
-      tabId,
-      startTime: Date.now()
-    };
-
-    console.log('[Background] Recording started successfully');
-    sendResponse({ success: true, message: 'Recording started' });
-
   } catch (error) {
-    console.error('[Background] Recording start failed:', error);
-    sendResponse({ success: false, error: error.message });
+    console.error('[MeetRec] Chunk upload failed:', error);
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'RECORDING_ERROR',
+        error: 'Upload failed: ' + error.message
+      });
+    }
+  } finally {
+    isUploading = false;
+    processUploadQueue();
   }
 }
 
-// Get stream ID using chrome.tabCapture
-function getStreamId(tabId) {
-  return new Promise((resolve, reject) => {
-    console.log('[Background] Getting stream ID for tab:', tabId);
+async function uploadChunkToCloudinary(blob, isFinal) {
+  const url = `https://api.cloudinary.com/v1_1/dtuqfmmtw/video/upload`;
+  const start = totalUploadedBytes;
+  const end = start + blob.size - 1;
 
-    chrome.tabCapture.getMediaStreamId(
-      { targetTabId: tabId },
-      (streamId) => {
-        if (chrome.runtime.lastError) {
-          console.error('[Background] getMediaStreamId error:', chrome.runtime.lastError.message);
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (streamId) {
-          console.log('[Background] Got stream ID:', streamId);
-          resolve(streamId);
-        } else {
-          reject(new Error('Failed to get stream ID'));
-        }
-      }
-    );
-  });
-}
+  const total = isFinal ? (totalUploadedBytes + blob.size) : '*';
+  const contentRange = `bytes ${start}-${end}/${total}`;
 
-// Setup offscreen document
-async function setupOffscreenDocument() {
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT']
-  });
-
-  if (existingContexts.length > 0) {
-    console.log('[Background] Offscreen document already exists');
-    return;
-  }
-
-  console.log('[Background] Creating offscreen document...');
-
-  // Create offscreen document
-  await chrome.offscreen.createDocument({
-    url: 'offscreen.html',
-    reasons: ['USER_MEDIA'],
-    justification: 'Recording meeting audio/video from chrome.tabCapture API'
-  });
-
-  console.log('[Background] Offscreen document created');
-}
-
-// Stop recording
-async function handleStopRecording(sendResponse) {
-  try {
-    console.log('[Background] Stopping recording...');
-
-    // Send stop message to offscreen document
-    chrome.runtime.sendMessage({
-      type: 'STOP_OFFSCREEN_RECORDING',
-      target: 'offscreen'
-    });
-
-    recordingState.isRecording = false;
-
-    console.log('[Background] Stop signal sent');
-    sendResponse({ success: true, message: 'Recording stopped and uploading' });
-
-  } catch (error) {
-    console.error('[Background] Recording stop failed:', error);
-    sendResponse({ success: false, error: error.message });
-  }
-}
-
-// Handle recording complete from offscreen
-async function handleRecordingComplete(data) {
-  const { blobUrl, metadata } = data;
-
-  console.log('[Background] Recording complete received:', metadata);
-
-  try {
-    // Convert blob URL to blob
-    const response = await fetch(blobUrl);
-    const blob = await response.blob();
-
-    console.log('[Background] Blob fetched, size:', blob.size);
-
-    // Upload to backend
-    await uploadRecording(blob, metadata);
-
-    // Clean up
-    URL.revokeObjectURL(blobUrl);
-    await chrome.offscreen.closeDocument();
-
-    recordingState.isRecording = false;
-
-    console.log('[Background] ✅ Recording uploaded successfully');
-
-  } catch (error) {
-    console.error('[Background] Upload failed:', error);
-  }
-}
-
-// Upload recording to backend
-async function uploadRecording(blob, metadata) {
   const formData = new FormData();
-  formData.append('video', blob, `recording-${Date.now()}.webm`);
-  formData.append('title', metadata.title);
-  formData.append('platform', metadata.platform);
-  formData.append('duration', metadata.duration.toString());
-  formData.append('size', metadata.size.toString());
+  formData.append('file', blob);
+  formData.append('upload_preset', 'meetrec');
+  formData.append('cloud_name', 'dtuqfmmtw');
 
-  console.log('[Background] Uploading to backend...');
+  const headers = {
+    'X-Unique-Upload-Id': uploadId,
+    'Content-Range': contentRange
+  };
 
-  const response = await fetch('http://localhost:3000/api/upload', {
+  const response = await fetch(url, {
     method: 'POST',
+    headers: headers,
     body: formData
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Upload failed: ${response.status} ${errorText}`);
+    const text = await response.text();
+    throw new Error(`Upload failed: ${response.status} - ${text}`);
   }
 
-  const result = await response.json();
-  console.log('[Background] Upload result:', result);
+  return await response.json();
+}
 
-  return result;
+async function saveMetadata(result) {
+  try {
+    const response = await fetch('http://localhost:3003/api/recordings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: 'Meeting Recording ' + new Date().toLocaleString(),
+        url: result.secure_url,
+        publicId: result.public_id,
+        duration: Math.round(result.duration || 0),
+        size: result.bytes || 0,
+        platform: 'google-meet'
+      })
+    });
+
+    if (!response.ok) {
+      console.error('Metadata save failed but upload succeeded');
+    }
+  } catch (e) {
+    console.error('Metadata save error:', e);
+  }
 }
