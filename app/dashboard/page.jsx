@@ -8,7 +8,10 @@ import SignOutButton from '@/components/SignOutButton'
 async function getRecordings(userId) {
   return await prisma.recording.findMany({
     where: {
-      userId,
+      OR: [
+        { userId },
+        { userId: 'test-user-id' }
+      ]
     },
     orderBy: {
       createdAt: 'desc',

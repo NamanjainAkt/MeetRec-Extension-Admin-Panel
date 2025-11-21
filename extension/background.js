@@ -138,7 +138,7 @@ async function uploadChunkToCloudinary(blob, isFinal) {
 
 async function saveMetadata(result) {
   try {
-    const response = await fetch('http://localhost:3003/api/recordings', {
+    const response = await fetch('http://localhost:3000/api/recordings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

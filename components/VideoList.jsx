@@ -58,6 +58,7 @@ export default function VideoList({ recordings }) {
             <div className="aspect-video bg-gray-200 flex items-center justify-center relative">
               <video
                 src={recording.url}
+                poster={recording.url.replace(/\.[^/.]+$/, ".jpg")}
                 className="w-full h-full object-cover"
                 preload="metadata"
               />
@@ -75,7 +76,7 @@ export default function VideoList({ recordings }) {
                   {recording.title || 'Untitled Recording'}
                 </h3>
                 <p className="text-xs text-gray-500">
-                  {new Date(recording.createdAt).toLocaleString()}
+                  {new Date(recording.createdAt).toLocaleString('en-US')}
                 </p>
               </div>
               <button
