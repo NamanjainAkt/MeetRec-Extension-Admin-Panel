@@ -17,7 +17,7 @@ export default function VideoPlayer({ recording, onClose }) {
         </div>
         <div className="p-4">
           <video
-            src={recording.url}
+            src={recording.url.replace(/\.webm$/, '.mp4').replace(/\.mkv$/, '.mp4')}
             controls
             autoPlay
             className="w-full max-h-[70vh]"

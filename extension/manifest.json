@@ -1,29 +1,36 @@
 {
   "manifest_version": 3,
-  "name": "Meeting Recorder",
-  "version": "1.0.0",
-  "description": "Record meetings from Google Meet, Zoom, and Teams",
+  "name": "MeetRec",
+  "version": "4.0.0",
+  "description": "Simple meeting recorder",
   "permissions": [
     "tabCapture",
-    "offscreen",
     "storage",
-    "activeTab",
-    "scripting"
+    "activeTab"
   ],
   "host_permissions": [
-    "http://localhost:3004/*",
-    "http://localhost:3000/*",
-    "https://*.vercel.app/*",
-    "https://*.netlify.app/*",
+    "http://localhost:3003/*",
     "https://meet.google.com/*",
     "https://*.zoom.us/*",
-    "https://teams.microsoft.com/*"
+    "https://teams.microsoft.com/*",
+    "https://api.cloudinary.com/*",
+    "https://res.cloudinary.com/*"
   ],
-  "action": {
-    "default_popup": "popup.html"
-  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://*.zoom.us/*",
+        "https://teams.microsoft.com/*"
+      ],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "MeetRec"
   }
 }
