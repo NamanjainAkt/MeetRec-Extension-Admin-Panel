@@ -30,6 +30,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
   }
 
+  if (message.type === 'FETCH_ASSEMBLYAI_KEY') {
+    fetch('https://meet-rec-extension-admin-panel.vercel.app/api/transcribe/apikey', {
+      method: 'POST',
+      credentials: 'include'
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch API key');
+        sendResponse({ success: true, data });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'FETCH_TOKEN') {
+    fetch('https://meet-rec-extension-admin-panel.vercel.app/api/transcribe/token', {
+      method: 'POST',
+      credentials: 'include'
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch token');
+        sendResponse({ success: true, data });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'CHAT_REQUEST') {
+    fetch('https://meet-rec-extension-admin-panel.vercel.app/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: message.messages }),
+      credentials: 'include'
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Chat request failed');
+        }
+        const text = await res.text();
+        sendResponse({ success: true, data: text });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   return true; // Keep channel open for async response
 });
 
@@ -138,7 +185,7 @@ async function uploadChunkToCloudinary(blob, isFinal) {
 
 async function saveMetadata(result) {
   try {
-    const response = await fetch('http://localhost:3000/api/recordings', {
+    const response = await fetch('https://meet-rec-extension-admin-panel.vercel.app/api/recordings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

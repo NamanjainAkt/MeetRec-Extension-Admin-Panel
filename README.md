@@ -266,7 +266,8 @@ CLOUDINARY_SECRET="ZoJ7NJjSJzWhcLtbb2A9SRsxlr0"
 
 # NextAuth
 NEXTAUTH_SECRET="development-secret-change-in-production"
-NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_URL="https://meet-rec-extension-admin-panel.vercel.app"
+NEXT_PUBLIC_SITE_URL="https://meet-rec-extension-admin-panel.vercel.app"
 GOOGLE_CLIENT_ID=""
 GOOGLE_CLIENT_SECRET=""
 ```
